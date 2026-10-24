@@ -1,0 +1,127 @@
+
+{% extends "base.html" %}
+
+{% block title %}Ana səhifə | Universitet Tədbirləri{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <p class="eyebrow">Universitet həyatına qoşul</p>
+    <h1>Universitet tədbirlərini kəşf et</h1>
+    <p>Konfranslara, seminarlara, təlimlərə və digər tədbirlərə bax, qeydiyyatdan keç.</p>
+</section>
+
+<section class="section">
+    <div class="section-heading">
+        <div>
+            <h2>Tədbirlər</h2>
+            <p class="muted">Sənə uyğun tədbiri axtar və seç.</p>
+        </div>
+    </div>
+
+    <form method="get" action="{{ url_for('index') }}" class="filter-form">
+        <div class="field">
+            <label for="q">Tədbirin adı və ya təsviri</label>
+            <input id="q" type="search" name="q"
+                   value="{{ filters.get('q', '') }}"
+                   placeholder="Məsələn, proqramlaşdırma">
+        </div>
+
+        <div class="field">
+            <label for="category">Kateqoriya</label>
+            <select id="category" name="category">
+                <option value="">Bütün kateqoriyalar</option>
+                {% for category in categories %}
+                    <option value="{{ category['id'] }}"
+                        {% if filters.get('category', '')|string == category['id']|string %}selected{% endif %}>
+                        {{ category['name'] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="field">
+            <label for="date">Tarix</label>
+            <input id="date" type="date" name="date"
+                   value="{{ filters.get('date', '') }}">
+        </div>
+
+        <div class="field">
+            <label for="location">Məkan</label>
+            <input id="location" type="text" name="location"
+                   value="{{ filters.get('location', '') }}"
+                   placeholder="Məkan axtar">
+        </div>
+
+        <div class="field">
+            <label for="status">Tarixə görə</label>
+            <select id="status" name="status">
+                <option value="all" {% if filters.get('status', 'all') == 'all' %}selected{% endif %}>Bütün tədbirlər</option>
+                <option value="upcoming" {% if filters.get('status') == 'upcoming' %}selected{% endif %}>Qarşıdakı tədbirlər</option>
+                <option value="past" {% if filters.get('status') == 'past' %}selected{% endif %}>Keçmiş tədbirlər</option>
+            </select>
+        </div>
+
+        <div class="filter-actions">
+            <button class="button" type="submit">Axtar</button>
+            <a class="button button-light" href="{{ url_for('index') }}">Sıfırla</a>
+        </div>
+    </form>
+
+    {% if events %}
+        <div class="event-grid">
+            {% for event in events %}
+                <article class="event-card">
+                    <div class="event-card-top">
+                        <span class="tag">{{ event['category_name'] }}</span>
+                        <span class="muted small">
+                            {{ event['participant_count'] }}/{{ event['capacity'] }} iştirakçı
+                        </span>
+                    </div>
+
+                    <h3>{{ event['title'] }}</h3>
+                    <p class="event-description">{{ event['description'] }}</p>
+
+                    <ul class="event-details">
+                        <li><strong>Tarix:</strong> {{ event['event_date'] }}</li>
+                        <li><strong>Saat:</strong> {{ event['event_time'] }}</li>
+                        <li><strong>Məkan:</strong> {{ event['location'] }}</li>
+                    </ul>
+
+                    {% if event['event_date'] < today %}
+                        <span class="tag tag-muted">Keçmiş tədbir</span>
+                    {% elif event['participant_count'] >= event['capacity'] %}
+                        <span class="tag tag-full">Yerlər dolub</span>
+                    {% elif current_user %}
+                        <form method="post"
+                              action="{{ url_for('event_register', event_id=event['id']) }}">
+                            <button class="button button-full" type="submit">
+                                Tədbirə qeydiyyat
+                            </button>
+                        </form>
+                    {% else %}
+                        <a class="button button-full" href="{{ url_for('login') }}">
+                            Daxil ol və qeydiyyatdan keç
+                        </a>
+                    {% endif %}
+
+                    {% if current_user and current_user['role'] == 'admin' %}
+                        <div class="card-admin-actions">
+                            <a href="{{ url_for('edit_event', event_id=event['id']) }}">Redaktə et</a>
+                            <form method="post"
+                                  action="{{ url_for('event_delete', event_id=event['id']) }}"
+                                  data-confirm="Bu tədbiri silmək istədiyinizə əminsiniz?">
+                                <button class="link-button danger-text" type="submit">Sil</button>
+                            </form>
+                        </div>
+                    {% endif %}
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <h3>Tədbir tapılmadı</h3>
+            <p>Axtarış şərtlərini dəyişib yenidən cəhd et.</p>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

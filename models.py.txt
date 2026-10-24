@@ -1,0 +1,433 @@
+
+import os
+import sqlite3
+from pathlib import Path
+from datetime import date
+from werkzeug.security import generate_password_hash, check_password_hash
+
+
+BASE_DIR = Path(__file__).resolve().parent
+DATABASE = BASE_DIR / "events.db"
+
+
+def get_connection():
+    """Verilənlər bazasına qoşulma yaradır."""
+    connection = sqlite3.connect(DATABASE)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
+
+
+def init_db():
+    """Cədvəlləri yaradır və ilkin məlumatları əlavə edir."""
+    with get_connection() as db:
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                full_name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user'
+                    CHECK(role IN ('user', 'admin')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                category_id INTEGER NOT NULL,
+                event_date TEXT NOT NULL,
+                event_time TEXT NOT NULL,
+                location TEXT NOT NULL,
+                capacity INTEGER NOT NULL CHECK(capacity > 0),
+                created_by INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(category_id) REFERENCES categories(id),
+                FOREIGN KEY(created_by) REFERENCES users(id)
+                    ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS registrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                event_id INTEGER NOT NULL,
+                registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, event_id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY(event_id) REFERENCES events(id)
+                    ON DELETE CASCADE
+            );
+        """)
+
+        categories = [
+            "Konfrans",
+            "Seminar",
+            "Təlim",
+            "İdman",
+            "Mədəniyyət",
+            "Digər"
+        ]
+
+        for category in categories:
+            db.execute(
+                "INSERT OR IGNORE INTO categories (name) VALUES (?)",
+                (category,)
+            )
+
+        admin_email = "admin@university.local"
+        admin = db.execute(
+            "SELECT id FROM users WHERE email = ?",
+            (admin_email,)
+        ).fetchone()
+
+        if not admin:
+            db.execute("""
+                INSERT INTO users
+                    (full_name, email, password_hash, role)
+                VALUES (?, ?, ?, ?)
+            """, (
+                "Administrator",
+                admin_email,
+                generate_password_hash("Admin123!"),
+                "admin"
+            ))
+
+
+def get_categories():
+    """Bütün tədbir kateqoriyalarını qaytarır."""
+    with get_connection() as db:
+        return db.execute(
+            "SELECT * FROM categories ORDER BY name"
+        ).fetchall()
+
+
+def get_user_by_email(email):
+    """E-poçt ünvanına əsasən istifadəçini tapır."""
+    with get_connection() as db:
+        return db.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (email,)
+        ).fetchone()
+
+
+def get_user_by_id(user_id):
+    """ID əsasında istifadəçini tapır."""
+    if not user_id:
+        return None
+
+    with get_connection() as db:
+        return db.execute(
+            "SELECT * FROM users WHERE id = ?",
+            (user_id,)
+        ).fetchone()
+
+
+def create_user(full_name, email, password):
+    """Yeni istifadəçi yaradır və şifrəsini heşləyir."""
+    with get_connection() as db:
+        db.execute("""
+            INSERT INTO users
+                (full_name, email, password_hash, role)
+            VALUES (?, ?, ?, 'user')
+        """, (
+            full_name,
+            email,
+            generate_password_hash(password)
+        ))
+
+
+def verify_password(user, password):
+    """İstifadəçinin şifrəsini yoxlayır."""
+    if not user:
+        return False
+
+    return check_password_hash(user["password_hash"], password)
+
+
+def list_events(
+    search="",
+    category_id="",
+    event_date="",
+    location="",
+    status="all"
+):
+    """Axtarış və filtrlərə uyğun tədbirləri qaytarır."""
+    query = """
+        SELECT
+            e.*,
+            c.name AS category_name,
+            u.full_name AS creator_name,
+            (
+                SELECT COUNT(*)
+                FROM registrations r
+                WHERE r.event_id = e.id
+            ) AS participant_count
+        FROM events e
+        JOIN categories c ON c.id = e.category_id
+        LEFT JOIN users u ON u.id = e.created_by
+        WHERE 1 = 1
+    """
+
+    params = []
+
+    if search:
+        query += " AND (e.title LIKE ? OR e.description LIKE ?)"
+        params.extend([f"%{search}%", f"%{search}%"])
+
+    if category_id:
+        try:
+            category_id = int(category_id)
+        except (TypeError, ValueError):
+            category_id = None
+
+        if category_id:
+            query += " AND e.category_id = ?"
+            params.append(category_id)
+
+    if event_date:
+        query += " AND e.event_date = ?"
+        params.append(event_date)
+
+    if location:
+        query += " AND e.location LIKE ?"
+        params.append(f"%{location}%")
+
+    if status == "upcoming":
+        query += " AND e.event_date >= ?"
+        params.append(date.today().isoformat())
+    elif status == "past":
+        query += " AND e.event_date < ?"
+        params.append(date.today().isoformat())
+
+    query += " ORDER BY e.event_date, e.event_time"
+
+    with get_connection() as db:
+        return db.execute(query, params).fetchall()
+
+
+def get_event(event_id):
+    """Bir tədbirin məlumatlarını və iştirakçı sayını qaytarır."""
+    with get_connection() as db:
+        return db.execute("""
+            SELECT
+                e.*,
+                c.name AS category_name,
+                (
+                    SELECT COUNT(*)
+                    FROM registrations r
+                    WHERE r.event_id = e.id
+                ) AS participant_count
+            FROM events e
+            JOIN categories c ON c.id = e.category_id
+            WHERE e.id = ?
+        """, (event_id,)).fetchone()
+
+
+def validate_event_data(data):
+    """Tədbir məlumatlarını yoxlayır."""
+    required = [
+        "title", "description", "category_id",
+        "event_date", "event_time", "location", "capacity"
+    ]
+
+    if any(not str(data.get(key, "")).strip() for key in required):
+        raise ValueError("Bütün sahələri doldurun.")
+
+    try:
+        capacity = int(data["capacity"])
+        category_id = int(data["category_id"])
+        date.fromisoformat(data["event_date"])
+    except (TypeError, ValueError):
+        raise ValueError("Tarix, kateqoriya və tutum düzgün olmalıdır.")
+
+    if capacity < 1:
+        raise ValueError("İştirakçı limiti ən azı 1 olmalıdır.")
+
+    with get_connection() as db:
+        category = db.execute(
+            "SELECT id FROM categories WHERE id = ?",
+            (category_id,)
+        ).fetchone()
+
+    if not category:
+        raise ValueError("Seçilmiş kateqoriya mövcud deyil.")
+
+    return capacity, category_id
+
+
+def create_event(data, created_by):
+    """Yeni tədbiri verilənlər bazasına əlavə edir."""
+    capacity, category_id = validate_event_data(data)
+
+    with get_connection() as db:
+        db.execute("""
+            INSERT INTO events (
+                title, description, category_id,
+                event_date, event_time, location,
+                capacity, created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data["title"].strip(),
+            data["description"].strip(),
+            category_id,
+            data["event_date"],
+            data["event_time"],
+            data["location"].strip(),
+            capacity,
+            created_by
+        ))
+
+
+def update_event(event_id, data):
+    """Tədbirin məlumatlarını yeniləyir."""
+    capacity, category_id = validate_event_data(data)
+
+    with get_connection() as db:
+        event = db.execute(
+            "SELECT id FROM events WHERE id = ?",
+            (event_id,)
+        ).fetchone()
+
+        if not event:
+            raise LookupError("Tədbir tapılmadı.")
+
+        registered = db.execute("""
+            SELECT COUNT(*) AS total
+            FROM registrations
+            WHERE event_id = ?
+        """, (event_id,)).fetchone()["total"]
+
+        if capacity < registered:
+            raise ValueError(
+                "Yeni tutum mövcud qeydiyyat sayından az ola bilməz."
+            )
+
+        db.execute("""
+            UPDATE events
+            SET title = ?,
+                description = ?,
+                category_id = ?,
+                event_date = ?,
+                event_time = ?,
+                location = ?,
+                capacity = ?
+            WHERE id = ?
+        """, (
+            data["title"].strip(),
+            data["description"].strip(),
+            category_id,
+            data["event_date"],
+            data["event_time"],
+            data["location"].strip(),
+            capacity,
+            event_id
+        ))
+
+
+def delete_event(event_id):
+    """Tədbiri silir; ona aid qeydiyyatlar da silinir."""
+    with get_connection() as db:
+        db.execute(
+            "DELETE FROM events WHERE id = ?",
+            (event_id,)
+        )
+
+
+def register_for_event(user_id, event_id):
+    """İstifadəçini tədbirə qeydiyyata alır."""
+    with get_connection() as db:
+        event = db.execute("""
+            SELECT id, event_date, capacity
+            FROM events
+            WHERE id = ?
+        """, (event_id,)).fetchone()
+
+        if not event:
+            raise LookupError("Tədbir tapılmadı.")
+
+        if event["event_date"] < date.today().isoformat():
+            raise ValueError("Keçmiş tarixli tədbirə yazılmaq olmaz.")
+
+        existing = db.execute("""
+            SELECT id FROM registrations
+            WHERE user_id = ? AND event_id = ?
+        """, (user_id, event_id)).fetchone()
+
+        if existing:
+            raise ValueError("Bu tədbirə artıq qeydiyyatdan keçmisiniz.")
+
+        count = db.execute("""
+            SELECT COUNT(*) AS total
+            FROM registrations
+            WHERE event_id = ?
+        """, (event_id,)).fetchone()["total"]
+
+        if count >= event["capacity"]:
+            raise ValueError("Tədbir üçün boş yer qalmayıb.")
+
+        db.execute("""
+            INSERT INTO registrations (user_id, event_id)
+            VALUES (?, ?)
+        """, (user_id, event_id))
+
+
+def cancel_registration(user_id, event_id):
+    """İstifadəçinin tədbir qeydiyyatını ləğv edir."""
+    with get_connection() as db:
+        db.execute("""
+            DELETE FROM registrations
+            WHERE user_id = ? AND event_id = ?
+        """, (user_id, event_id))
+
+
+def user_registrations(user_id):
+    """İstifadəçinin qeydiyyatdan keçdiyi tədbirləri qaytarır."""
+    with get_connection() as db:
+        return db.execute("""
+            SELECT
+                e.*,
+                c.name AS category_name,
+                r.registered_at
+            FROM registrations r
+            JOIN events e ON e.id = r.event_id
+            JOIN categories c ON c.id = e.category_id
+            WHERE r.user_id = ?
+            ORDER BY e.event_date, e.event_time
+        """, (user_id,)).fetchall()
+
+
+def get_stats():
+    """Administrator paneli üçün ümumi statistikalar."""
+    with get_connection() as db:
+        users = db.execute(
+            "SELECT COUNT(*) AS total FROM users WHERE role = 'user'"
+        ).fetchone()["total"]
+
+        events = db.execute(
+            "SELECT COUNT(*) AS total FROM events"
+        ).fetchone()["total"]
+
+        registrations = db.execute(
+            "SELECT COUNT(*) AS total FROM registrations"
+        ).fetchone()["total"]
+
+        upcoming = db.execute("""
+            SELECT COUNT(*) AS total
+            FROM events
+            WHERE event_date >= ?
+        """, (date.today().isoformat(),)).fetchone()["total"]
+
+    return {
+        "users": users,
+        "events": events,
+        "registrations": registrations,
+        "upcoming_events": upcoming
+    }

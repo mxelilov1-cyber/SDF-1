@@ -1,0 +1,13 @@
+
+{% extends "base.html" %}
+
+{% block title %}Xəta {{ code }}{% endblock %}
+
+{% block content %}
+<section class="empty-state error-page">
+    <p class="eyebrow">Xəta {{ code }}</p>
+    <h1>{{ message }}</h1>
+    <p class="muted">Ana səhifəyə qayıdaraq yenidən cəhd edə bilərsən.</p>
+    <a class="button" href="{{ url_for('index') }}">Ana səhifəyə qayıt</a>
+</section>
+{% endblock %}

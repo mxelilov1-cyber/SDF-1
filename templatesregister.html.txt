@@ -1,0 +1,84 @@
+
+{% extends "base.html" %}
+
+{% block title %}
+    {% if show_registrations|default(false) %}
+        Qeydiyyatlarım
+    {% else %}
+        Qeydiyyat
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if show_registrations|default(false) %}
+    <section class="section">
+        <h1>Qeydiyyatdan keçdiyim tədbirlər</h1>
+        <p class="muted">Burada iştirak edəcəyin tədbirləri görə və qeydiyyatını ləğv edə bilərsən.</p>
+
+        {% if registrations %}
+            <div class="event-grid">
+                {% for event in registrations %}
+                    <article class="event-card">
+                        <span class="tag">{{ event['category_name'] }}</span>
+                        <h3>{{ event['title'] }}</h3>
+                        <ul class="event-details">
+                            <li><strong>Tarix:</strong> {{ event['event_date'] }}</li>
+                            <li><strong>Saat:</strong> {{ event['event_time'] }}</li>
+                            <li><strong>Məkan:</strong> {{ event['location'] }}</li>
+                        </ul>
+
+                        <form method="post"
+                              action="{{ url_for('event_cancel', event_id=event['id']) }}"
+                              data-confirm="Bu tədbirə qeydiyyatını ləğv etmək istəyirsən?">
+                            <button class="button button-danger button-full" type="submit">
+                                Qeydiyyatı ləğv et
+                            </button>
+                        </form>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Hələ qeydiyyat yoxdur</h3>
+                <p>Tədbirlərə baxaraq istədiyinə qeydiyyatdan keçə bilərsən.</p>
+                <a class="button" href="{{ url_for('index') }}">Tədbirlərə bax</a>
+            </div>
+        {% endif %}
+    </section>
+{% else %}
+    <section class="auth-wrapper">
+        <div class="auth-card">
+            <h1>Yeni hesab yarat</h1>
+            <p class="muted">Universitet tədbirlərində iştirak etmək üçün qeydiyyatdan keç.</p>
+
+            <form method="post" action="{{ url_for('register') }}">
+                <div class="field">
+                    <label for="full_name">Ad və soyad</label>
+                    <input id="full_name" type="text" name="full_name"
+                           autocomplete="name" maxlength="100" required>
+                </div>
+
+                <div class="field">
+                    <label for="email">E-poçt ünvanı</label>
+                    <input id="email" type="email" name="email"
+                           autocomplete="email" maxlength="254" required>
+                </div>
+
+                <div class="field">
+                    <label for="password">Şifrə</label>
+                    <input id="password" type="password" name="password"
+                           autocomplete="new-password" minlength="8" required>
+                    <small>Şifrə ən azı 8 simvol olmalıdır.</small>
+                </div>
+
+                <button class="button button-full" type="submit">Qeydiyyatdan keç</button>
+            </form>
+
+            <p class="auth-footer">
+                Artıq hesabın var?
+                <a href="{{ url_for('login') }}">Daxil ol</a>
+            </p>
+        </div>
+    </section>
+{% endif %}
+{% endblock %}

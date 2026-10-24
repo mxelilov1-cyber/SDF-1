@@ -1,0 +1,74 @@
+
+{% extends "base.html" %}
+
+{% block title %}
+    {% if event %}Tədbiri redaktə et{% else %}Yeni tədbir{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="form-page">
+    <div class="form-card">
+        <h1>{% if event %}Tədbiri redaktə et{% else %}Yeni tədbir yarat{% endif %}</h1>
+        <p class="muted">Tədbirin məlumatlarını doldur.</p>
+
+        <form method="post">
+            <div class="field">
+                <label for="title">Tədbirin adı</label>
+                <input id="title" name="title" type="text" maxlength="150"
+                       value="{{ event['title'] if event else '' }}" required>
+            </div>
+
+            <div class="field">
+                <label for="description">Təsvir</label>
+                <textarea id="description" name="description" rows="5"
+                          maxlength="5000" required>{{ event['description'] if event else '' }}</textarea>
+            </div>
+
+            <div class="field">
+                <label for="category_id">Kateqoriya</label>
+                <select id="category_id" name="category_id" required>
+                    <option value="">Kateqoriya seç</option>
+                    {% for category in categories %}
+                        <option value="{{ category['id'] }}"
+                            {% if event and event['category_id'] == category['id'] %}selected{% endif %}>
+                            {{ category['name'] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-row">
+                <div class="field">
+                    <label for="event_date">Tarix</label>
+                    <input id="event_date" type="date" name="event_date"
+                           value="{{ event['event_date'] if event else '' }}" required>
+                </div>
+
+                <div class="field">
+                    <label for="event_time">Saat</label>
+                    <input id="event_time" type="time" name="event_time"
+                           value="{{ event['event_time'] if event else '' }}" required>
+                </div>
+            </div>
+
+            <div class="field">
+                <label for="location">Məkan</label>
+                <input id="location" name="location" type="text" maxlength="200"
+                       value="{{ event['location'] if event else '' }}" required>
+            </div>
+
+            <div class="field">
+                <label for="capacity">İştirakçı limiti</label>
+                <input id="capacity" name="capacity" type="number"
+                       min="1" step="1"
+                       value="{{ event['capacity'] if event else 50 }}" required>
+            </div>
+
+            <div class="form-actions">
+                <button class="button" type="submit">Yadda saxla</button>
+                <a class="button button-light" href="{{ url_for('dashboard') }}">Ləğv et</a>
+            </div>
+        </form>
+    </div>
+</section>
+{% endblock %}

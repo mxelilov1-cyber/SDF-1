@@ -1,0 +1,330 @@
+
+from datetime import date
+from functools import wraps
+import os
+import sqlite3
+
+from flask import (
+    Flask, render_template, request, redirect,
+    url_for, session, flash, abort
+)
+from werkzeug.exceptions import HTTPException
+
+from models import (
+    init_db, get_categories, get_user_by_email, get_user_by_id,
+    create_user, verify_password, list_events, get_event,
+    create_event, update_event, delete_event, register_for_event,
+    cancel_registration, user_registrations, get_stats
+)
+
+app = Flask(__name__)
+app.secret_key = os.environ.get(
+    "SECRET_KEY", "dev-only-change-this-secret-key"
+)
+
+# Verilənlər bazasını ilkin olaraq hazırlayırıq.
+init_db()
+
+
+@app.context_processor
+def inject_current_user():
+    """İstifadəçi məlumatlarını bütün HTML səhifələrinə ötürür."""
+    user_id = session.get("user_id")
+    current_user = get_user_by_id(user_id) if user_id else None
+
+    return {
+        "current_user": current_user,
+        "today": date.today().isoformat()
+    }
+
+
+def login_required(view):
+    """Yalnız sistemə daxil olmuş istifadəçilər üçün."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Davam etmək üçün əvvəlcə daxil olun.", "warning")
+            return redirect(url_for("login"))
+
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def admin_required(view):
+    """Yalnız administrator üçün icazə yoxlaması."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        user_id = session.get("user_id")
+
+        if not user_id:
+            flash("Əvvəlcə sistemə daxil olun.", "warning")
+            return redirect(url_for("login"))
+
+        user = get_user_by_id(user_id)
+
+        if not user or user["role"] != "admin":
+            abort(403)
+
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+@app.get("/")
+def index():
+    """Tədbirlərin siyahısı və axtarış/filter funksiyaları."""
+    events = list_events(
+        search=request.args.get("q", ""),
+        category_id=request.args.get("category", ""),
+        event_date=request.args.get("date", ""),
+        location=request.args.get("location", ""),
+        status=request.args.get("status", "all")
+    )
+
+    return render_template(
+        "index.html",
+        events=events,
+        categories=get_categories(),
+        filters=request.args
+    )
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    """Yeni istifadəçi hesabı yaradır."""
+    if request.method == "POST":
+        full_name = request.form.get("full_name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        if not full_name or not email or not password:
+            flash("Bütün sahələri doldurun.", "danger")
+
+        elif len(password) < 8:
+            flash(
+                "Şifrə ən azı 8 simvoldan ibarət olmalıdır.",
+                "danger"
+            )
+
+        else:
+            try:
+                create_user(full_name, email, password)
+                flash(
+                    "Hesab yaradıldı. İndi daxil ola bilərsiniz.",
+                    "success"
+                )
+                return redirect(url_for("login"))
+
+            except sqlite3.IntegrityError:
+                flash(
+                    "Bu e-poçt ünvanı artıq qeydiyyatdan keçib.",
+                    "danger"
+                )
+
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """E-poçt və şifrə ilə sistemə giriş."""
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        user = get_user_by_email(email)
+
+        if verify_password(user, password):
+            session.clear()
+            session["user_id"] = user["id"]
+
+            flash("Sistemə uğurla daxil oldunuz.", "success")
+            return redirect(url_for("index"))
+
+        flash("E-poçt və ya şifrə yanlışdır.", "danger")
+
+    return render_template("login.html")
+
+
+@app.post("/logout")
+def logout():
+    """İstifadəçinin sistemdən çıxışı."""
+    session.clear()
+    flash("Sistemdən çıxış edildi.", "info")
+    return redirect(url_for("index"))
+
+
+@app.post("/events/<int:event_id>/register")
+@login_required
+def event_register(event_id):
+    """İstifadəçini tədbirə qeydiyyata alır."""
+    try:
+        register_for_event(session["user_id"], event_id)
+        flash(
+            "Tədbirə qeydiyyat uğurla tamamlandı.",
+            "success"
+        )
+
+    except (ValueError, LookupError) as exc:
+        flash(str(exc), "danger")
+
+    return redirect(request.referrer or url_for("index"))
+
+
+@app.post("/events/<int:event_id>/cancel")
+@login_required
+def event_cancel(event_id):
+    """Tədbir qeydiyyatını ləğv edir."""
+    cancel_registration(session["user_id"], event_id)
+    flash("Qeydiyyatınız ləğv edildi.", "info")
+
+    return redirect(request.referrer or url_for("index"))
+
+
+@app.get("/my-registrations")
+@login_required
+def my_registrations():
+    """İstifadəçinin qeydiyyatdan keçdiyi tədbirlər."""
+    return render_template(
+        "register.html",
+        registrations=user_registrations(session["user_id"]),
+        show_registrations=True
+    )
+
+
+@app.get("/dashboard")
+@admin_required
+def dashboard():
+    """Administrator paneli və statistik məlumatlar."""
+    return render_template(
+        "dashboard.html",
+        stats=get_stats(),
+        events=list_events()
+    )
+
+
+@app.route("/events/new", methods=["GET", "POST"])
+@admin_required
+def new_event():
+    """Yeni tədbir yaradır."""
+    if request.method == "POST":
+        try:
+            required = [
+                "title", "description", "category_id",
+                "event_date", "event_time", "location", "capacity"
+            ]
+
+            data = {
+                key: request.form.get(key, "").strip()
+                for key in required
+            }
+
+            if any(not data[key] for key in required):
+                raise ValueError("Bütün sahələri doldurun.")
+
+            if data["event_date"] < date.today().isoformat():
+                raise ValueError(
+                    "Yeni tədbirin tarixi keçmişdə ola bilməz."
+                )
+
+            create_event(data, session["user_id"])
+
+            flash("Tədbir yaradıldı.", "success")
+            return redirect(url_for("dashboard"))
+
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            flash(str(exc) or "Məlumatları yoxlayın.", "danger")
+
+    return render_template(
+        "event_form.html",
+        event=None,
+        categories=get_categories()
+    )
+
+
+@app.route("/events/<int:event_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_event(event_id):
+    """Mövcud tədbirin məlumatlarını yeniləyir."""
+    event = get_event(event_id)
+
+    if not event:
+        abort(404)
+
+    if request.method == "POST":
+        try:
+            required = [
+                "title", "description", "category_id",
+                "event_date", "event_time", "location", "capacity"
+            ]
+
+            data = {
+                key: request.form.get(key, "").strip()
+                for key in required
+            }
+
+            if any(not data[key] for key in required):
+                raise ValueError("Bütün sahələri doldurun.")
+
+            update_event(event_id, data)
+
+            flash("Tədbir məlumatları yeniləndi.", "success")
+            return redirect(url_for("dashboard"))
+
+        except (ValueError, LookupError, sqlite3.IntegrityError) as exc:
+            flash(str(exc) or "Məlumatları yoxlayın.", "danger")
+
+    return render_template(
+        "event_form.html",
+        event=event,
+        categories=get_categories()
+    )
+
+
+@app.post("/events/<int:event_id>/delete")
+@admin_required
+def event_delete(event_id):
+    """Tədbiri silir."""
+    delete_event(event_id)
+    flash("Tədbir silindi.", "info")
+
+    return redirect(url_for("dashboard"))
+
+
+@app.errorhandler(403)
+def forbidden(_error):
+    return render_template(
+        "error.html",
+        code=403,
+        message="Bu səhifəyə giriş icazəniz yoxdur."
+    ), 403
+
+
+@app.errorhandler(404)
+def not_found(_error):
+    return render_template(
+        "error.html",
+        code=404,
+        message="Axtarılan səhifə və ya tədbir tapılmadı."
+    ), 404
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    if isinstance(error, HTTPException):
+        return error
+
+    app.logger.exception("Gözlənilməyən xəta")
+
+    return render_template(
+        "error.html",
+        code=500,
+        message=(
+            "Gözlənilməyən xəta baş verdi. "
+            "Bir az sonra yenidən cəhd edin."
+        )
+    ), 500
+
+
+if __name__ == "__main__":
+    app.run(debug=True)

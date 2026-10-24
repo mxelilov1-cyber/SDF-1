@@ -1,0 +1,83 @@
+
+{% extends "base.html" %}
+
+{% block title %}Administrator paneli{% endblock %}
+
+{% block content %}
+<section class="section">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">İdarəetmə</p>
+            <h1>Administrator paneli</h1>
+            <p class="muted">Sistemin vəziyyətini izlə və tədbirləri idarə et.</p>
+        </div>
+
+        <a class="button" href="{{ url_for('new_event') }}">+ Yeni tədbir</a>
+    </div>
+
+    <div class="stats-grid">
+        <article class="stat-card">
+            <span>İstifadəçilər</span>
+            <strong>{{ stats['users'] }}</strong>
+        </article>
+        <article class="stat-card">
+            <span>Bütün tədbirlər</span>
+            <strong>{{ stats['events'] }}</strong>
+        </article>
+        <article class="stat-card">
+            <span>Qeydiyyatlar</span>
+            <strong>{{ stats['registrations'] }}</strong>
+        </article>
+        <article class="stat-card">
+            <span>Qarşıdakı tədbirlər</span>
+            <strong>{{ stats['upcoming_events'] }}</strong>
+        </article>
+    </div>
+</section>
+
+<section class="section">
+    <h2>Tədbirlərin idarə edilməsi</h2>
+
+    {% if events %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tədbir</th>
+                        <th>Kateqoriya</th>
+                        <th>Tarix</th>
+                        <th>İştirakçılar</th>
+                        <th>Əməliyyatlar</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in events %}
+                        <tr>
+                            <td>{{ event['title'] }}</td>
+                            <td>{{ event['category_name'] }}</td>
+                            <td>{{ event['event_date'] }}</td>
+                            <td>{{ event['participant_count'] }}/{{ event['capacity'] }}</td>
+                            <td>
+                                <div class="table-actions">
+                                    <a href="{{ url_for('edit_event', event_id=event['id']) }}">Redaktə</a>
+
+                                    <form method="post"
+                                          action="{{ url_for('event_delete', event_id=event['id']) }}"
+                                          data-confirm="Bu tədbiri silmək istədiyinizə əminsiniz?">
+                                        <button class="link-button danger-text" type="submit">Sil</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <h3>Hələ tədbir yoxdur</h3>
+            <p>Başlamaq üçün yeni tədbir yarat.</p>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}
